@@ -37,20 +37,16 @@ $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 # Resolve date range
 # -----------------------------
 if ($StartDate -and $EndDate) {
-
     if ($StartDate -gt $EndDate) {
         throw "StartDate must be earlier than EndDate."
     }
 
     $StartTime = $StartDate
     $EndTime   = $EndDate
-
 }
 elseif ($DaysBack) {
-
     $EndTime   = Get-Date
     $StartTime = $EndTime.AddDays(-$DaysBack)
-
 }
 else {
     # Default fallback
@@ -144,6 +140,14 @@ $SystemAccounts = @(
     "NT AUTHORITY\NETWORK SERVICE",
     "NT AUTHORITY\ANONYMOUS LOGON"
 )
+
+# Exclude offenders that are system-generated:
+# - NT AUTHORITY\*
+# - Window Manager\*
+# - Font Driver Host\*
+# - built-in service names (SYSTEM/LOCAL SERVICE/NETWORK SERVICE)
+# - computer accounts ending with $
+$ExcludeOffenderRegex = '^(?:NT AUTHORITY\\|WINDOW MANAGER\\|FONT DRIVER HOST\\|SYSTEM$|LOCAL SERVICE$|NETWORK SERVICE$|ANONYMOUS LOGON$).+|.*\$$'
 
 function Resolve-SidToName {
     param([string]$Sid)
@@ -299,11 +303,6 @@ function New-FilteredEventObject {
     $offender = Get-OffenderFromEvent -Event $Event
 
     if ($id -eq 4625) {
-        #$attempted = ("{0}\{1}" -f (Pick @("TargetDomainName","TargetUserDomain")), (Pick @("TargetUserName","TargetUser"))).Trim("\")
-        #if (-not [string]::IsNullOrWhiteSpace($attempted)) {
-        #    $offender = $attempted
-        #}
-
         $acct = Get-FieldValue -Event $Event -FieldNames @(
             "TargetUserName",      # if present
             "AccountName",         # often used on 4625
@@ -349,13 +348,20 @@ function New-FilteredEventObject {
     # - well-known system/service accounts
     # - computer accounts ending with $
     if ($id -ne 4625) {
+        
+        if (-not $offender) { return $null }
+
+        if ($offender.ToUpper() -match $ExcludeOffenderRegex) {
+            return $null
+        }
+        <#
         if ($offender) {
             if ($SystemAccounts -contains $offender.ToUpper()) { return $null }
             if ($offender -match '\$$') { return $null } # treat machine accounts as "system-generated"
         } else {
             # If no offender can be determined, treat as system-generated and skip
             return $null
-        }
+        }#>
     }
 
     $base = [ordered]@{
@@ -959,8 +965,8 @@ $ScriptEndTime = Get-Date
 $Elapsed = $Stopwatch.Elapsed
 
 Write-Host ""
-Write-Host "========== Script Execution Summary ==========" -ForegroundColor Cyan
+Write-Host "========== Script Execution Summary =========="
 Write-Host ("Start Time : {0}" -f $ScriptStartTime)
 Write-Host ("End Time   : {0}" -f $ScriptEndTime)
-Write-Host ("Duration   : {0:hh\:mm\:ss\.fff}" -f $Elapsed) -ForegroundColor Green
-Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host ("Duration   : {0:hh\:mm\:ss\.fff}" -f $Elapsed)
+Write-Host "=============================================="
